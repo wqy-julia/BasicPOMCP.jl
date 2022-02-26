@@ -114,8 +114,9 @@ Partially Observable Monte Carlo Planning Solver.
     tree_queries::Int       = 1000
     max_time::Float64       = Inf
     tree_in_info::Bool      = false
-    default_action::Any     = ExceptionRethrow()
+    # default_action::Any     = ExceptionRethrow()
     rng::AbstractRNG        = Random.GLOBAL_RNG
+    default_action::Any     = RandomActionGenerator(rng)
     estimate_value::Any     = RolloutEstimator(RandomSolver(rng))
 end
 

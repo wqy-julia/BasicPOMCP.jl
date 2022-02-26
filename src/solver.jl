@@ -10,7 +10,8 @@ function action_info(p::POMCPPlanner, b; tree_in_info=false)
         end
     catch ex
         # Note: this might not be type stable, but it shouldn't matter too much here
-        a = convert(actiontype(p.problem), default_action(p.solver.default_action, p.problem, b, ex))
+        # a = convert(actiontype(p.problem), default_action(p.solver.default_action, p.problem, b, ex))
+        a = convert(actiontype(p.problem), default_action(RandomPolicy(p.problem, rng=MersenneTwister(1)), p.problem, b, ex))
         info[:exception] = ex
     end
     return a, info
@@ -22,6 +23,8 @@ function search(p::POMCPPlanner, b, t::POMCPTree, info::Dict)
     all_terminal = true
     nquery = 0
     start_us = CPUtime_us()
+    info[:tree_depth] = 0
+    dep_count=0
     for i in 1:p.solver.tree_queries
         nquery += 1
         if CPUtime_us() - start_us >= 1e6*p.solver.max_time
@@ -29,7 +32,10 @@ function search(p::POMCPPlanner, b, t::POMCPTree, info::Dict)
         end
         s = rand(p.rng, b)
         if !POMDPs.isterminal(p.problem, s)
-            simulate(p, s, POMCPObsNode(t, 1), p.solver.max_depth)
+            reward, depth = simulate(p, s, POMCPObsNode(t, 1), p.solver.max_depth)
+            info[:tree_depth] = (info[:tree_depth] * dep_count + depth) / (dep_count + 1)
+            dep_count+=1
+            # info[:tree_depth] = max(info[:tree_depth], depth)
             all_terminal = false
         end
     end
@@ -57,10 +63,10 @@ end
 solve(solver::POMCPSolver, pomdp::POMDP) = POMCPPlanner(solver, pomdp)
 
 function simulate(p::POMCPPlanner, s, hnode::POMCPObsNode, steps::Int)
+    dep = 1.0
     if steps == 0 || isterminal(p.problem, s)
-        return 0.0
+        return 0.0, dep
     end
-
     t = hnode.tree
     h = hnode.node
 
@@ -91,6 +97,7 @@ function simulate(p::POMCPPlanner, s, hnode::POMCPObsNode, steps::Int)
 
     hao = get(t.o_lookup, (ha, o), 0)
     if hao == 0
+        dep = dep + 1.0
         hao = insert_obs_node!(t, p.problem, ha, sp, o)
         v = estimate_value(p.solved_estimator,
                            p.problem,
@@ -99,12 +106,14 @@ function simulate(p::POMCPPlanner, s, hnode::POMCPObsNode, steps::Int)
                            steps-1)
         R = r + discount(p.problem)*v
     else
-        R = r + discount(p.problem)*simulate(p, sp, POMCPObsNode(t, hao), steps-1)
+        reward, depth = simulate(p, sp, POMCPObsNode(t, hao), steps-1)
+        dep = depth + 1
+        R = r + discount(p.problem) * reward
     end
 
     t.total_n[h] += 1
     t.n[ha] += 1
     t.v[ha] += (R-t.v[ha])/t.n[ha]
 
-    return R
+    return R, dep
 end
